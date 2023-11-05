@@ -47,6 +47,9 @@ class Asteroid(pygame.sprite.Sprite):
                 self.image = loader.loadImage(160, 0, 160, 160)
             case 3:     
                 self.image = loader.loadImage(160*2, 0, 160, 160)
+
+        # random asteroid alpha
+        self.image.set_alpha(random.randrange(125, 255, 10))        
         
         self.rect = self.image.get_rect()
         # scale image according to the asteroid type
@@ -108,6 +111,16 @@ class Asteroid(pygame.sprite.Sprite):
     def set_collided(self) -> int:
         """ Asteroid has collided """        
         self.kill()
+        match self.type:
+            case 1:     
+                value = 20
+            case 2:     
+                value = 50
+            case 3:     
+                value = 100
+        return value
+
+        
 
 
     def update(self, pressed_keys):

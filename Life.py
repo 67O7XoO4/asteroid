@@ -13,6 +13,8 @@ class Life(pygame.sprite.Sprite):
         """
         super().__init__() 
         self.image = loader.loadImage(64*3, 160+96, 96, 64, 0.5)
+        self.image = pygame.transform.rotate(self.image, 90)
+
         self.rect = self.image.get_rect()
         self.rect.center = (x, 24)
                 

@@ -5,10 +5,10 @@ import math
 
 from AssetLoader import AssetLoader
 
-ROTATION_SPEED = 5      # angle in degree
-SPEEDUP = 0.4           # how much the ship speedup
-MAX_SPEED = 10          # max speed
-NATURAL_SLOWDOWN = 0.05  # how much the ship slowdown 
+ROTATION_SPEED      = 5     # angle in degree
+SPEEDUP             = 0.3   # how much the ship speedup
+MAX_SPEED           = 8     # max speed
+NATURAL_SLOWDOWN    = 0.995  # how much the ship slowdown 
 
 
 class Player(pygame.sprite.Sprite):
@@ -49,7 +49,8 @@ class Player(pygame.sprite.Sprite):
         self.image = self.imageNoEngine
         self.rect.center = self.start_position
         self.original_rect = self.rect;
-        self.speed = 0
+        self.x_speed = 0
+        self.y_speed = 0
         self.angle = 90 # rotation angle of the sprite
         self.collided = False
         self.state_of_grace = True
@@ -82,31 +83,21 @@ class Player(pygame.sprite.Sprite):
         
         self.original_image = self.imageNoEngine
         
-        # up / down keys: accelerate / brake 
-        if pressed_keys[K_UP] and self.speed<MAX_SPEED:
+        # up keys: accelerate  
+        if pressed_keys[K_UP] and self.x_speed<MAX_SPEED and self.y_speed<MAX_SPEED:
             #  use alternate image with a "flame" behind the ship to simulate speed up
             self.original_image = self.imageWithEngine 
-            self.speed+= SPEEDUP
-                        
             self.asset_loader.playSound('thrust')
-    
-
-        if pressed_keys[K_DOWN] and self.speed> -MAX_SPEED:
-            self.speed-= (SPEEDUP/2)
-        if not pressed_keys[K_UP] and not pressed_keys[K_DOWN]:
-            # not key pressed : natural slown down 
-            if self.speed > 0 :
-                self.speed-= NATURAL_SLOWDOWN ;
-                if (self.speed<0):
-                    self.speed = 0
-            elif self.speed < 0 :
-                self.speed+= NATURAL_SLOWDOWN ;
-                if (self.speed>0):
-                    self.speed = 0
+            
+            # speed projection on axes
+            self.x_speed += SPEEDUP*math.cos(math.radians(self.angle))
+            self.y_speed -=  SPEEDUP*math.sin(math.radians(self.angle))
+        
+        if not pressed_keys[K_UP]:
+            # no key pressed : natural slown down 
+            self.x_speed = self.x_speed * NATURAL_SLOWDOWN
+            self.y_speed = self.y_speed * NATURAL_SLOWDOWN
                 
-        # speed projection on axes
-        self.x_speed = self.speed*math.cos(math.radians(self.angle))
-        self.y_speed =  - self.speed*math.sin(math.radians(self.angle))
         # move sprite
         self.original_rect.move_ip(self.x_speed,self.y_speed)
         #image rotation

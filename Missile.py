@@ -39,3 +39,6 @@ class Missile(pygame.sprite.Sprite):
     def on_out_of_bound(self, width, height):
         # remove the missile from the game if out of bound
         self.kill()
+        
+    def set_collided(self):
+        return 0

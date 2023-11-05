@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import random
 import pygame
@@ -12,6 +13,7 @@ from Level import Level
 from Life import Life
 from Missile import Missile
 from Player import Player
+from Saucer import Saucer
 from Score import Score
 
 # USER Event : a new asteroid arises
@@ -19,6 +21,8 @@ NEW_ASTEROID_EVENT                  = USEREVENT+1
 LIVE_LOST_EVENT                     = USEREVENT+2
 END_OF_STATE_OF_GRACE_EVENT         = USEREVENT+3
 END_OF_STATE_OF_GRACE_ALPHA_EVENT   = USEREVENT+4
+NEW_FLYING_SAUCER_EVENT             = USEREVENT+5
+NEW_FLYING_SAUCER_SHOT_EVENT        = USEREVENT+6
 
 SCREEN_WIDTH    = 1024
 SCREEN_HEIGHT   = 800
@@ -32,10 +36,12 @@ class App:
         self._screen = None
         # Screen information
         self.size = self.width, self.height = SCREEN_WIDTH, SCREEN_HEIGHT
-        pygame.init()
+        
+        pygame.mixer.pre_init(44100, -16, 2, 2048)
         pygame.mixer.init() # enable sounds
+        pygame.init()
         pygame.display.set_caption("Asteroid")
-        # no clear : https://stackoverflow.com/questions/29135147/what-do-hwsurface-and-doublebuf-do
+        # not clear : https://stackoverflow.com/questions/29135147/what-do-hwsurface-and-doublebuf-do
         self._screen = pygame.display.set_mode(self.size, pygame.HWSURFACE | pygame.DOUBLEBUF)
 
         self.background = pygame.image.load(os.path.join("assets","background.jpeg")).convert()
@@ -64,6 +70,7 @@ class App:
             self.fps.tick(FPS)
             
         self.cleanup()
+ 
          
          
     def init(self):
@@ -92,13 +99,17 @@ class App:
         # 3 remainig lives
         self.remaining_lives = pygame.sprite.Group()
         for x in range(1,4):
-            life = Life(self.asset_loader, self.width - 50*x)
+            life = Life(self.asset_loader, self.width - 40*x)
             self.sprites.add(life)
             self.remaining_lives.add(life)
             
-        # missiles and asteroids groups        
-        self.missiles = pygame.sprite.Group()
-        self.asteroids = pygame.sprite.Group()        
+        # missiles from the player (not from saucer) 
+        self.missiles  = pygame.sprite.Group()
+        # all others group: asteroids, saucer and saucer's missile
+        self.ennemies  = pygame.sprite.Group()   
+
+        self.flying_saucer = None
+        
         
         
     def cleanup(self):
@@ -115,17 +126,35 @@ class App:
                 self.sprites.add(missile)
                 self.missiles.add(missile)
             if self._game_over :
-                # start a nex Game
+                # start a next Game
                 self.init()
                 self.sprites.add(BigMessage(pygame,"Go go go !!", (self.width/2, self.height/2), True))
                 
         if event.type == END_OF_STATE_OF_GRACE_EVENT:
             self.player.state_of_grace = False
+
+        if event.type == NEW_FLYING_SAUCER_SHOT_EVENT:
+            if self.flying_saucer is not None:
+                # missile shot
+                (x1, y1) = self.flying_saucer.rect.center
+                (x2, y2) = self.player.rect.center
+                angle = math.degrees(math.atan2((y1 - y2), (x2 - x1) ))
+                diff= 80 - self.level.num*5
+                missile = Missile(self.asset_loader, (x1, y1), angle + random.randrange(-diff, +diff))
+                self.sprites.add(missile)
+                self.ennemies.add(missile)
+                #next shot
+                pygame.time.set_timer(NEW_FLYING_SAUCER_SHOT_EVENT,  random.randrange(250, 3000 - self.level.num*100), 1)
+
             
         if event.type == NEW_ASTEROID_EVENT:
             # new asteroid arise 
             self.create_asteroid()
               
+        if (event.type == NEW_FLYING_SAUCER_EVENT):
+            # new saucer arise 
+            self.create_flying_saucer()
+            
         if event.type == LIVE_LOST_EVENT:
             if len(self.remaining_lives)==0: 
                 # GAME OVER
@@ -151,11 +180,22 @@ class App:
     def create_asteroid(self, parent_asteroid=None):
         asteroid = Asteroid(self.asset_loader, parent_asteroid = parent_asteroid, screen_size=self.size)
         self.sprites.add(asteroid)  
-        self.asteroids.add(asteroid)
+        self.ennemies.add(asteroid)
+
+    def create_flying_saucer(self):
+        self.flying_saucer = Saucer(self.asset_loader, self.size, self.on_flying_saucer_killed)
+        self.sprites.add(self.flying_saucer)  
+        self.ennemies.add(self.flying_saucer)
+        #start shooting
+        pygame.time.set_timer(NEW_FLYING_SAUCER_SHOT_EVENT,  random.randrange(250, 2500), 1)
 
 
-    def add_explosion(self, center, big_one=False):
+    def on_flying_saucer_killed(self):
+        self.flying_saucer = None
+        pygame.time.set_timer(NEW_FLYING_SAUCER_SHOT_EVENT, 0) # stop shooting
         
+        
+    def add_explosion(self, center, big_one=False):
         if big_one:
             step =  2
             self.asset_loader.playSound('bangLarge')
@@ -172,59 +212,71 @@ class App:
             update game status
         """
         
-        # check missiles and asteroid collisions
-        collided = pygame.sprite.groupcollide(self.missiles, self.asteroids, True, False,
+        # check missiles and ennemies collisions
+        collided = pygame.sprite.groupcollide(self.missiles, self.ennemies, True, False,
                                    collided=pygame.sprite.collide_rect_ratio(.5))
         
-        for collided_missiles, collided_asteroids in collided.items():
-            for collided_asteroid in collided_asteroids:
+        for collided_missiles, collideds in collided.items():
+            for collided in collideds:
                 # explosion animation
-                self.add_explosion(collided_asteroid.rect.center)
+                self.add_explosion(collided.rect.center)
 
-                collided_asteroid.set_collided()
-                if collided_asteroid.type < Asteroid.MAX_TYPE:
+                value = collided.set_collided()
+                # increment user score with the value of the collided item
+                self.score.increment(value) 
+
+                if isinstance(collided, Asteroid) and collided.type < Asteroid.MAX_TYPE:
                     # create 2 smaller asteroids 
-                    self.create_asteroid(collided_asteroid)
-                    self.create_asteroid(collided_asteroid)
-                # increment user score
-                self.score.increment(collided_asteroid.type) 
+                    self.create_asteroid(collided)
+                    self.create_asteroid(collided)
         
         if not self.player.collided and not self.player.state_of_grace:
             # check player and asteroid collisions
-            collided = pygame.sprite.spritecollide(self.player, self.asteroids, True, 
+            collided = pygame.sprite.spritecollide(self.player, self.ennemies, True, 
                                     collided=pygame.sprite.collide_rect_ratio(.5))
             if len(collided) > 0 :
+
+                # the callback is not called : calling it now
+                if self.flying_saucer in collided:
+                    self.on_flying_saucer_killed()
+
                 # display a big explosion animation 
                 self.add_explosion(self.player.rect.center, True)
                 self.add_explosion(self.player.rect.center, False)
                 # set player as collided
                 self.player.set_collided()
-                
+                                    
                 # remove one live if any
                 if len(self.remaining_lives)>0:
                     remaining_live = self.remaining_lives.sprites()[0]
-                    self.remaining_lives.remove(remaining_live)
                     remaining_live.kill()
+                    self.add_explosion(remaining_live.rect.center, False)
+                
                 # wait before restart the game
                 pygame.time.set_timer(LIVE_LOST_EVENT, 2000, 1)
-
+            
         # call each sprite to update itself
         self.sprites.update(pygame.key.get_pressed())
         
-        # check sprites out of screen
+        # check for sprites out of screen
         for sprite in self.sprites:
             if self.is_out_of_bound(sprite):
                 sprite.on_out_of_bound(self.width, self.height)
 
         # next level ?
-        if len(self.asteroids) == 0:
-            self.score.increment(10)
+        if len(self.ennemies) == 0:
             self.level.next()
             # create first asteroid
             self.create_asteroid()      
             # next asteroids will be created by random events.
             # frequency : trigger every 0 - 1 seconds
-            pygame.time.set_timer(NEW_ASTEROID_EVENT, random.randrange(0, 1000), 2+self.level.num*2)
+            pygame.time.set_timer(NEW_ASTEROID_EVENT, random.randrange(0, 1000), 1+self.level.num*2)
+            if (self.level.num>1): # no saucer in the first level
+                # a flying saucer will appear within 10 secs
+                pygame.time.set_timer(NEW_FLYING_SAUCER_EVENT, random.randrange(0, 10000), 1)
+            # if not self.flying_saucer:
+            #     pygame.time.set_timer(NEW_FLYING_SAUCER_EVENT, random.randrange(0, 1000), 1)
+            
 
     
     def render(self):
